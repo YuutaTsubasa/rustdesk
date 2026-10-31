@@ -24,8 +24,8 @@
 // off it like --pin does. A menu bar item and the panel's HIDE button (or Esc)
 // hide it or bring it back at any time, connected or not. --wallpaper loops a (muted) video behind the panel.
 // --music plays an album folder (Music.swift) while the panel is up.
-// --desktop-video loops a (muted) video as the virtual display's desktop
-// picture (DesktopVideo.swift) while it exists.
+// --desktop-video loops a (muted) video as the desktop picture of every
+// display the panel is not covering (DesktopVideo.swift).
 import AppKit
 import ApplicationServices
 import CoreGraphics
@@ -115,9 +115,14 @@ func onlineDisplays() -> [CGDirectDisplayID] {
 }
 
 // "#N Connection opened" / "#N Connection closed" in the RustDesk server log.
+// The log rotates at midnight (into RustDesk_r<date>_<time>.log), so a session
+// opened before then is only in the newest rotated file: read that one first.
 func openRustDeskConnections() -> Int {
-    let path = NSHomeDirectory() + "/Library/Logs/RustDesk/server/RustDesk_rCURRENT.log"
-    guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return 0 }
+    let dir = NSHomeDirectory() + "/Library/Logs/RustDesk/server/"
+    let rotated = (try? FileManager.default.contentsOfDirectory(atPath: dir))?
+        .filter { $0.hasPrefix("RustDesk_r20") && $0.hasSuffix(".log") }.max()
+    let text = ([rotated, "RustDesk_rCURRENT.log"].compactMap { $0 })
+        .compactMap { try? String(contentsOfFile: dir + $0, encoding: .utf8) }.joined(separator: "\n")
     var open = Set<Substring>()
     for line in text.split(separator: "\n") {
         guard let hash = line.firstIndex(of: "#") else { continue }
@@ -257,7 +262,14 @@ func tick() {
     let wanted = dashboardOverride ?? (connected && trusted)
     let target = display.map { physicalDisplay(besides: $0.displayID) } ?? CGMainDisplayID()
     dashboard?.update(on: wanted ? target : nil, connections: connections, focus: dashboardOverride == true)
-    desktopVideo?.update(on: display?.displayID)
+    if let desktopVideo {
+        var count: UInt32 = 0
+        CGGetOnlineDisplayList(0, nil, &count)
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        CGGetOnlineDisplayList(count, &ids, &count)
+        // Skip mirrored displays and the one the panel covers.
+        desktopVideo.update(on: ids.prefix(Int(count)).filter { CGDisplayMirrorsDisplay($0) == kCGNullDirectDisplay && !(wanted && $0 == target) })
+    }
     if let display, pinBundleID != nil || showDashboard, trusted {
         arrangeWindows(virtualID: display.displayID, pin: pinBundleID)
     }

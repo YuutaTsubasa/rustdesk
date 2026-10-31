@@ -20,7 +20,8 @@
 //
 // --dashboard shows a full-screen status panel (Dashboard.swift) on the
 // physical display while the virtual display exists, and moves other windows
-// off it like --pin does. --wallpaper loops a (muted) video behind the panel.
+// off it like --pin does. A menu bar item and the panel's HIDE button (or Esc)
+// hide it or bring it back at any time, connected or not. --wallpaper loops a (muted) video behind the panel.
 // --music plays an album folder (Music.swift) while the panel is up.
 import AppKit
 import ApplicationServices
@@ -215,8 +216,12 @@ if !followRustDesk {
     if display == nil { exit(1) }
 }
 
-// 1 s so the dashboard clock ticks; reading the RustDesk log is cheap.
-Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+/// Set from the menu bar item or the panel's hide button; nil follows the
+/// connection (shown while connected). Reset whenever the connection changes.
+var dashboardOverride: Bool?
+var wasConnected = false
+
+func tick() {
     let connections = openRustDeskConnections()
     if followRustDesk {
         if connections > 0 {
@@ -235,14 +240,74 @@ Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             }
         }
     }
+    let connected = display != nil
+    if connected != wasConnected {
+        dashboardOverride = nil
+        wasConnected = connected
+    }
     // Without Accessibility, windows on the physical display cannot be moved off,
-    // so the panel would hide them (System Settings included): leave it down.
+    // so the panel would hide them (System Settings included): only show it then
+    // when asked to.
     let trusted = AXIsProcessTrusted()
-    dashboard?.update(on: trusted ? display.flatMap { physicalDisplay(besides: $0.displayID) } : nil, connections: connections)
+    let wanted = dashboardOverride ?? (connected && trusted)
+    let target = display.map { physicalDisplay(besides: $0.displayID) } ?? CGMainDisplayID()
+    dashboard?.update(on: wanted ? target : nil, connections: connections, focus: dashboardOverride == true)
     if let display, pinBundleID != nil || showDashboard, trusted {
         arrangeWindows(virtualID: display.displayID, pin: pinBundleID)
     }
 }
+
+/// Menu bar item to bring the panel back after hiding it, and to drive the music.
+final class StatusMenu: NSObject, NSMenuDelegate {
+    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    private let dashboard: Dashboard
+    /// Sets the show/hide override and refreshes; a closure because a type
+    /// declared in main.swift cannot reach the top-level state directly.
+    private let setShown: (Bool) -> Void
+
+    init(dashboard: Dashboard, setShown: @escaping (Bool) -> Void) {
+        self.dashboard = dashboard
+        self.setShown = setShown
+        super.init()
+        item.button?.image = NSImage(systemSymbolName: "rectangle.inset.filled.on.rectangle", accessibilityDescription: "Dashboard")
+        let menu = NSMenu()
+        menu.delegate = self
+        item.menu = menu
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        add(menu, dashboard.isShown ? "隱藏面板" : "顯示面板", #selector(toggleDashboard))
+        if let music = dashboard.music {
+            menu.addItem(.separator())
+            add(menu, music.playing ? "暫停音樂" : "播放音樂", #selector(toggleMusic))
+            add(menu, "下一首", #selector(nextTrack))
+        }
+    }
+
+    private func add(_ menu: NSMenu, _ title: String, _ action: Selector) {
+        let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        entry.target = self
+        menu.addItem(entry)
+    }
+
+    @objc private func toggleDashboard() {
+        setShown(!dashboard.isShown)
+    }
+
+    @objc private func toggleMusic() { dashboard.music?.toggle() }
+    @objc private func nextTrack() { dashboard.music?.next() }
+}
+
+func setDashboardShown(_ shown: Bool) {
+    dashboardOverride = shown
+    tick()
+}
+let statusMenu = dashboard.map { StatusMenu(dashboard: $0, setShown: setDashboardShown) }
+dashboard?.onHide = { setDashboardShown(false) }
+
+// 1 s so the dashboard clock ticks; reading the RustDesk log is cheap.
+Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in tick() }
 
 signal(SIGINT) { _ in exit(0) }
 signal(SIGTERM) { _ in exit(0) }

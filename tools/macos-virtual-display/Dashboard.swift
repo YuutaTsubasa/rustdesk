@@ -154,6 +154,7 @@ final class DashboardModel: ObservableObject {
     @Published var track: TrackInfo?
     var cover: NSImage?
     var music: MusicPlayer?
+    var onHide: (() -> Void)?
 
     private var cpuSampler = CPUSampler()
     private var netSampler = NetSampler()
@@ -402,6 +403,17 @@ struct DashboardView: View {
             Text("CHAOTIXMACHINE").font(BB.display(20))
             Text("REMOTE CONSOLE ／ 遠端主控台").font(BB.cond(14)).foregroundStyle(BB.ink3).tracking(1)
             Spacer()
+            Button { model.onHide?() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "eye.slash.fill").font(.system(size: 11, weight: .bold))
+                    Text("HIDE").font(BB.display(14))
+                }
+                .foregroundStyle(BB.ink2)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 2)
+                .overlay(Parallelogram().stroke(BB.ink4, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
             Text(model.connections > 0 ? "ONLINE" : "STANDBY")
                 .font(BB.display(15))
                 .foregroundStyle(model.connections > 0 ? .black : BB.ink3)
@@ -562,13 +574,29 @@ struct DashboardView: View {
 
 // MARK: - window
 
+/// Borderless windows cannot become key by default; this one can, so Esc hides it.
+final class DashboardWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+
+    override func cancelOperation(_ sender: Any?) {
+        onEscape?()
+    }
+
+    var onEscape: (() -> Void)?
+}
+
 final class Dashboard {
     private let model = DashboardModel()
     private var window: NSWindow?
     private let wallpaper: URL?
     private var player: AVQueuePlayer?
     private var looper: AVPlayerLooper?
-    private let music: MusicPlayer?
+    let music: MusicPlayer?
+    var onHide: (() -> Void)? {
+        get { model.onHide }
+        set { model.onHide = newValue }
+    }
+    var isShown: Bool { window?.isVisible == true }
 
     init(wallpaper: URL?, music: URL?) {
         self.wallpaper = wallpaper
@@ -578,7 +606,8 @@ final class Dashboard {
     }
 
     /// Shows the panel full screen on `displayID`, or hides it when nil.
-    func update(on displayID: CGDirectDisplayID?, connections: Int) {
+    /// `focus` takes keyboard focus (for Esc) when the user asked for the panel.
+    func update(on displayID: CGDirectDisplayID?, connections: Int, focus: Bool = false) {
         guard let displayID,
               let screen = NSScreen.screens.first(where: { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == displayID })
         else {
@@ -594,6 +623,10 @@ final class Dashboard {
         let window = self.window ?? makeWindow()
         if window.frame != screen.frame { window.setFrame(screen.frame, display: true) }
         if !window.isVisible {
+            if focus {
+                NSApp.activate(ignoringOtherApps: true)
+                window.makeKeyAndOrderFront(nil)
+            }
             window.orderFrontRegardless()
             player?.play()
             music?.resumeForDashboard()
@@ -601,12 +634,13 @@ final class Dashboard {
     }
 
     private func makeWindow() -> NSWindow {
-        let window = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
+        let window = DashboardWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
         // Above the menu bar so the panel covers the whole physical display.
         window.level = .statusBar
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         window.backgroundColor = .black
         window.isReleasedWhenClosed = false
+        window.onEscape = { [weak self] in self?.model.onHide?() }
         let hosting = NSHostingView(rootView: DashboardView(model: model, overVideo: wallpaper != nil))
         if let wallpaper {
             // AVPlayerLooper keeps a seamless loop; the SwiftUI layer sits on top.

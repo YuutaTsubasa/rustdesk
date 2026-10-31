@@ -3,7 +3,7 @@
 //
 //   virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror]
 //                   [--follow-rustdesk] [--pin <bundle id>] [--dashboard]
-//                   [--wallpaper <video>]
+//                   [--wallpaper <video>] [--music <album folder>]
 //
 // The display exists while this process runs; Ctrl+C removes it. With --main
 // it becomes the main display for this login session only (the arrangement
@@ -21,6 +21,7 @@
 // --dashboard shows a full-screen status panel (Dashboard.swift) on the
 // physical display while the virtual display exists, and moves other windows
 // off it like --pin does. --wallpaper loops a (muted) video behind the panel.
+// --music plays an album folder (Music.swift) while the panel is up.
 import AppKit
 import ApplicationServices
 import CoreGraphics
@@ -28,7 +29,7 @@ import CoreGraphics
 setvbuf(stdout, nil, _IOLBF, 0)
 let args = CommandLine.arguments
 guard args.count >= 3, let pw = UInt(args[1]), let ph = UInt(args[2]), pw % 2 == 0, ph % 2 == 0 else {
-    FileHandle.standardError.write("usage: virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror] [--follow-rustdesk] [--pin <bundle id>] [--dashboard] [--wallpaper <video>] (even numbers)\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror] [--follow-rustdesk] [--pin <bundle id>] [--dashboard] [--wallpaper <video>] [--music <album folder>] (even numbers)\n".data(using: .utf8)!)
     exit(64)
 }
 let makeMain = args.contains("--main")
@@ -197,7 +198,8 @@ func arrangeWindows(virtualID: CGDirectDisplayID, pin: String?) {
 
 var display: CGVirtualDisplay?
 var idleSince: Date?
-let dashboard = showDashboard ? Dashboard(wallpaper: wallpaperURL) : nil
+let musicURL = args.firstIndex(of: "--music").flatMap { $0 + 1 < args.count ? URL(fileURLWithPath: args[$0 + 1], isDirectory: true) : nil }
+let dashboard = showDashboard ? Dashboard(wallpaper: wallpaperURL, music: musicURL) : nil
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 

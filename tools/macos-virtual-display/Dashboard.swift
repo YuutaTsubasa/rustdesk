@@ -151,6 +151,8 @@ final class DashboardModel: ObservableObject {
     @Published var connectedSince: Date?
     @Published var tailscale: String?
     @Published var backup: (when: String, failed: Int)?
+    @Published var track: TrackInfo?
+    var cover: NSImage?
 
     private var cpuSampler = CPUSampler()
     private var netSampler = NetSampler()
@@ -414,6 +416,9 @@ struct DashboardView: View {
         // Over the wallpaper video the clock drops to the bottom left so the
         // character in the video stays visible.
         VStack(alignment: .leading, spacing: 0) {
+            if let track = model.track {
+                NowPlayingPlate(track: track, cover: model.cover).padding(.bottom, overVideo ? 0 : 6)
+            }
             if overVideo { Spacer() }
             HStack(spacing: 12) {
                 Rectangle().fill(BB.yellow).frame(width: 46, height: 6)
@@ -555,9 +560,12 @@ final class Dashboard {
     private let wallpaper: URL?
     private var player: AVQueuePlayer?
     private var looper: AVPlayerLooper?
+    private let music: MusicPlayer?
 
-    init(wallpaper: URL?) {
+    init(wallpaper: URL?, music: URL?) {
         self.wallpaper = wallpaper
+        self.music = music.flatMap { MusicPlayer(folder: $0) }
+        model.cover = self.music?.cover
     }
 
     /// Shows the panel full screen on `displayID`, or hides it when nil.
@@ -568,15 +576,18 @@ final class Dashboard {
             if window?.isVisible == true {
                 window?.orderOut(nil)
                 player?.pause()
+                music?.pause()
             }
             return
         }
         model.refresh(connections: connections)
+        model.track = music?.info
         let window = self.window ?? makeWindow()
         if window.frame != screen.frame { window.setFrame(screen.frame, display: true) }
         if !window.isVisible {
             window.orderFrontRegardless()
             player?.play()
+            music?.play()
         }
     }
 

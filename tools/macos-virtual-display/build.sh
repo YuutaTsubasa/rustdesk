@@ -9,5 +9,5 @@ cd "$(dirname "$0")"
 app=build/VirtualDisplay.app
 mkdir -p "$app/Contents/MacOS"
 cp Info.plist "$app/Contents/Info.plist"
-swiftc -O -import-objc-header CGVirtualDisplay.h main.swift Dashboard.swift -o "$app/Contents/MacOS/virtual-display"
+swiftc -O -import-objc-header CGVirtualDisplay.h main.swift Dashboard.swift Music.swift -o "$app/Contents/MacOS/virtual-display"
 codesign -s - -f "$app"

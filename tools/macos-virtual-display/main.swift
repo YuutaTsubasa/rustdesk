@@ -9,6 +9,7 @@
 import CoreGraphics
 import Foundation
 
+setvbuf(stdout, nil, _IOLBF, 0)
 let args = CommandLine.arguments
 guard args.count >= 3, let pw = UInt(args[1]), let ph = UInt(args[2]), pw % 2 == 0, ph % 2 == 0 else {
     FileHandle.standardError.write("usage: virtual-display <pixelWidth> <pixelHeight> [--main] (even numbers)\n".data(using: .utf8)!)

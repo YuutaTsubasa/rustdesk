@@ -4,6 +4,7 @@
 import AVFoundation
 import AppKit
 import Darwin
+import IOKit.pwr_mgt
 import SwiftUI
 
 extension Color {
@@ -592,6 +593,8 @@ final class Dashboard {
     private let wallpaper: URL?
     private var player: AVQueuePlayer?
     private var spectrumTimer: Timer?
+    /// Keeps the display awake while the panel is shown, so it works as a clock.
+    private var noDisplaySleep: IOPMAssertionID?
     private var looper: AVPlayerLooper?
     let music: MusicPlayer?
     var onHide: (() -> Void)? {
@@ -619,6 +622,10 @@ final class Dashboard {
                 music?.pauseForDashboard()
                 spectrumTimer?.invalidate()
                 spectrumTimer = nil
+                if let assertion = noDisplaySleep {
+                    IOPMAssertionRelease(assertion)
+                    noDisplaySleep = nil
+                }
             }
             return
         }
@@ -639,6 +646,13 @@ final class Dashboard {
                 let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { _ in frames.levels = music.spectrum.frame() }
                 RunLoop.main.add(timer, forMode: .common)
                 spectrumTimer = timer
+            }
+            if noDisplaySleep == nil {
+                var assertion = IOPMAssertionID(0)
+                if IOPMAssertionCreateWithName(kIOPMAssertionTypeNoDisplaySleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                                               "Dashboard panel is shown" as CFString, &assertion) == kIOReturnSuccess {
+                    noDisplaySleep = assertion
+                }
             }
         }
     }

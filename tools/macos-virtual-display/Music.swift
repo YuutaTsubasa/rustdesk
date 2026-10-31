@@ -200,6 +200,8 @@ final class MusicPlayer {
         pausedAt = elapsed
         playing = false
         node.pause()
+        // Release the output device too, or the engine keeps playing silence.
+        engine.pause()
         spectrum.silence()
         publishNowPlaying()
     }

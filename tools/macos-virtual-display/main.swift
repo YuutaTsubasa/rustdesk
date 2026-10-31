@@ -1,21 +1,23 @@
 // Prototype: create a HiDPI virtual display with the client's pixel size so a
 // RustDesk session fills the client screen without letterboxing.
 //
-//   virtual-display <pixelWidth> <pixelHeight> [--main]
+//   virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror]
 //
 // The display exists while this process runs; Ctrl+C removes it. With --main
 // it becomes the main display for this login session only (the arrangement
-// reverts when the display goes away).
+// reverts when the display goes away). With --mirror the other displays mirror
+// it, so no window can open on a screen the client cannot see.
 import CoreGraphics
 import Foundation
 
 setvbuf(stdout, nil, _IOLBF, 0)
 let args = CommandLine.arguments
 guard args.count >= 3, let pw = UInt(args[1]), let ph = UInt(args[2]), pw % 2 == 0, ph % 2 == 0 else {
-    FileHandle.standardError.write("usage: virtual-display <pixelWidth> <pixelHeight> [--main] (even numbers)\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror] (even numbers)\n".data(using: .utf8)!)
     exit(64)
 }
 let makeMain = args.contains("--main")
+let mirror = args.contains("--mirror")
 
 let descriptor = CGVirtualDisplayDescriptor()
 descriptor.queue = DispatchQueue.main
@@ -50,22 +52,26 @@ guard display.apply(settings) else {
 let id = display.displayID
 print("created display \(id): \(pw / 2)x\(ph / 2) points, \(pw)x\(ph) pixels")
 
-if makeMain {
-    // The main display is the one at origin (0, 0); put the others to its left.
+if makeMain || mirror {
     var config: CGDisplayConfigRef?
     CGBeginDisplayConfiguration(&config)
     var count: UInt32 = 0
     CGGetOnlineDisplayList(0, nil, &count)
     var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
     CGGetOnlineDisplayList(count, &ids, &count)
+    // The main display is the one at origin (0, 0); put the others to its left.
     var x: Int32 = 0
     for other in ids where other != id {
-        x -= Int32(CGDisplayPixelsWide(other))
-        CGConfigureDisplayOrigin(config, other, x, 0)
+        if mirror {
+            CGConfigureDisplayMirrorOfDisplay(config, other, id)
+        } else {
+            x -= Int32(CGDisplayPixelsWide(other))
+            CGConfigureDisplayOrigin(config, other, x, 0)
+        }
     }
     CGConfigureDisplayOrigin(config, id, 0, 0)
     let err = CGCompleteDisplayConfiguration(config, .forSession)
-    print(err == .success ? "display \(id) is now the main display" : "could not make it main: \(err.rawValue)")
+    print(err == .success ? "display \(id) is now the main display\(mirror ? ", mirrored by the others" : "")" : "could not configure displays: \(err.rawValue)")
 }
 
 signal(SIGINT) { _ in exit(0) }

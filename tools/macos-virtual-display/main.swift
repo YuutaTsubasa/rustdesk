@@ -3,6 +3,7 @@
 //
 //   virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror]
 //                   [--follow-rustdesk] [--pin <bundle id>] [--dashboard]
+//                   [--wallpaper <video>]
 //
 // The display exists while this process runs; Ctrl+C removes it. With --main
 // it becomes the main display for this login session only (the arrangement
@@ -19,7 +20,7 @@
 //
 // --dashboard shows a full-screen status panel (Dashboard.swift) on the
 // physical display while the virtual display exists, and moves other windows
-// off it like --pin does.
+// off it like --pin does. --wallpaper loops a (muted) video behind the panel.
 import AppKit
 import ApplicationServices
 import CoreGraphics
@@ -27,7 +28,7 @@ import CoreGraphics
 setvbuf(stdout, nil, _IOLBF, 0)
 let args = CommandLine.arguments
 guard args.count >= 3, let pw = UInt(args[1]), let ph = UInt(args[2]), pw % 2 == 0, ph % 2 == 0 else {
-    FileHandle.standardError.write("usage: virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror] [--follow-rustdesk] [--pin <bundle id>] [--dashboard] (even numbers)\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror] [--follow-rustdesk] [--pin <bundle id>] [--dashboard] [--wallpaper <video>] (even numbers)\n".data(using: .utf8)!)
     exit(64)
 }
 let makeMain = args.contains("--main")
@@ -35,6 +36,7 @@ let mirror = args.contains("--mirror")
 let followRustDesk = args.contains("--follow-rustdesk")
 let pinBundleID = args.firstIndex(of: "--pin").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
 let showDashboard = args.contains("--dashboard")
+let wallpaperURL = args.firstIndex(of: "--wallpaper").flatMap { $0 + 1 < args.count ? URL(fileURLWithPath: args[$0 + 1]) : nil }
 let graceSeconds = Double(ProcessInfo.processInfo.environment["GRACE_SECONDS"] ?? "") ?? 20
 
 func log(_ message: String) {
@@ -195,7 +197,7 @@ func arrangeWindows(virtualID: CGDirectDisplayID, pin: String?) {
 
 var display: CGVirtualDisplay?
 var idleSince: Date?
-let dashboard = showDashboard ? Dashboard() : nil
+let dashboard = showDashboard ? Dashboard(wallpaper: wallpaperURL) : nil
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 

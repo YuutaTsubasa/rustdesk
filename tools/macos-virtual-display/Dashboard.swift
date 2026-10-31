@@ -1,6 +1,7 @@
 // --dashboard: a full-screen bluebolt-ui styled panel (clock, system load,
 // remote status) on the physical display while a RustDesk client is connected.
 // Colours and type follow bluebolt-ui's dark tokens (src/lib/styles/tokens.css).
+import AVFoundation
 import AppKit
 import Darwin
 import SwiftUI
@@ -24,7 +25,7 @@ enum BB {
     static let blue2 = Color(hex: 0x4d86ff)
     static let sky = Color(hex: 0x3d9bff)
     static let yellow = Color(hex: 0xffd84a)
-    static let glass = Color(hex: 0x0d1530, alpha: 0.72)
+    static let glass = Color(hex: 0x0d1530, alpha: 0.84)
     static let glassEdge = Color(red: 120 / 255, green: 160 / 255, blue: 1, opacity: 0.35)
     static let red = Color(hex: 0xff5a5a)
 
@@ -313,6 +314,8 @@ func duration(_ seconds: TimeInterval) -> String {
 
 struct DashboardView: View {
     @ObservedObject var model: DashboardModel
+    /// A looping video plays underneath; draw a scrim instead of the opaque background.
+    var overVideo = false
 
     private static let time = formatter("HH:mm")
     private static let seconds = formatter("ss")
@@ -348,7 +351,21 @@ struct DashboardView: View {
         .foregroundStyle(BB.ink)
     }
 
-    private var background: some View {
+    @ViewBuilder private var background: some View {
+        if overVideo {
+            // Darken the video only where the clock sits (bottom left).
+            ZStack {
+                Color.black.opacity(0.12)
+                LinearGradient(stops: [.init(color: BB.paper.opacity(0.85), location: 0), .init(color: BB.paper.opacity(0.5), location: 0.35),
+                                       .init(color: .clear, location: 0.6)], startPoint: .bottom, endPoint: .top)
+                LinearGradient(colors: [BB.paper.opacity(0.35), .clear], startPoint: .leading, endPoint: .center)
+            }
+        } else {
+            staticBackground
+        }
+    }
+
+    private var staticBackground: some View {
         ZStack {
             LinearGradient(colors: [BB.paper, Color(hex: 0x0a1638), BB.paper], startPoint: .topLeading, endPoint: .bottomTrailing)
             // Faceted blue bands, the static stand-in for bluebolt-ui's chrome background.
@@ -394,26 +411,29 @@ struct DashboardView: View {
     }
 
     private var clock: some View {
+        // Over the wallpaper video the clock drops to the bottom left so the
+        // character in the video stays visible.
         VStack(alignment: .leading, spacing: 0) {
+            if overVideo { Spacer() }
             HStack(spacing: 12) {
                 Rectangle().fill(BB.yellow).frame(width: 46, height: 6)
-                Text("LOCAL TIME").font(BB.cond(18)).foregroundStyle(BB.ink3).tracking(4)
+                Text("LOCAL TIME").font(BB.cond(18)).foregroundStyle(overVideo ? BB.ink2 : BB.ink3).tracking(4)
                 Text("台北").font(.system(size: 14, weight: .bold)).foregroundStyle(BB.ink4)
             }
-            .padding(.top, 34)
+            .padding(.top, overVideo ? 0 : 34)
             HStack(alignment: .lastTextBaseline, spacing: 10) {
                 Text(Self.time.string(from: model.now))
-                    .font(BB.display(230))
+                    .font(BB.display(overVideo ? 150 : 230))
                     .monospacedDigit()
                     .shadow(color: BB.blue2.opacity(0.55), radius: 24)
                 Text(Self.seconds.string(from: model.now))
-                    .font(BB.display(76))
+                    .font(BB.display(overVideo ? 52 : 76))
                     .monospacedDigit()
                     .foregroundStyle(BB.sky)
             }
-            .padding(.top, -24)
+            .padding(.top, overVideo ? -16 : -24)
             HStack(alignment: .center, spacing: 16) {
-                Text(Self.date.string(from: model.now)).font(BB.display(52))
+                Text(Self.date.string(from: model.now)).font(BB.display(overVideo ? 40 : 52))
                 Text(Self.weekdayEN.string(from: model.now).uppercased())
                     .font(BB.display(26))
                     .foregroundStyle(.white)
@@ -423,7 +443,7 @@ struct DashboardView: View {
                 Text(Self.weekdayZH.string(from: model.now)).font(.system(size: 22, weight: .heavy)).foregroundStyle(BB.ink2)
             }
             .padding(.top, -10)
-            Spacer()
+            if overVideo { Spacer().frame(height: 22) } else { Spacer() }
             HStack(spacing: 4) {
                 ForEach(0..<24, id: \.self) { hour in
                     let current = Calendar.current.component(.hour, from: model.now)
@@ -532,19 +552,32 @@ struct DashboardView: View {
 final class Dashboard {
     private let model = DashboardModel()
     private var window: NSWindow?
+    private let wallpaper: URL?
+    private var player: AVQueuePlayer?
+    private var looper: AVPlayerLooper?
+
+    init(wallpaper: URL?) {
+        self.wallpaper = wallpaper
+    }
 
     /// Shows the panel full screen on `displayID`, or hides it when nil.
     func update(on displayID: CGDirectDisplayID?, connections: Int) {
         guard let displayID,
               let screen = NSScreen.screens.first(where: { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == displayID })
         else {
-            window?.orderOut(nil)
+            if window?.isVisible == true {
+                window?.orderOut(nil)
+                player?.pause()
+            }
             return
         }
         model.refresh(connections: connections)
         let window = self.window ?? makeWindow()
         if window.frame != screen.frame { window.setFrame(screen.frame, display: true) }
-        if !window.isVisible { window.orderFrontRegardless() }
+        if !window.isVisible {
+            window.orderFrontRegardless()
+            player?.play()
+        }
     }
 
     private func makeWindow() -> NSWindow {
@@ -554,7 +587,28 @@ final class Dashboard {
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         window.backgroundColor = .black
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: DashboardView(model: model))
+        let hosting = NSHostingView(rootView: DashboardView(model: model, overVideo: wallpaper != nil))
+        if let wallpaper {
+            // AVPlayerLooper keeps a seamless loop; the SwiftUI layer sits on top.
+            let player = AVQueuePlayer()
+            player.isMuted = true
+            player.preventsDisplaySleepDuringVideoPlayback = false
+            looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: wallpaper))
+            self.player = player
+            let container = NSView()
+            container.wantsLayer = true
+            let videoLayer = AVPlayerLayer(player: player)
+            videoLayer.videoGravity = .resizeAspectFill
+            videoLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+            container.layer?.addSublayer(videoLayer)
+            hosting.frame = container.bounds
+            hosting.autoresizingMask = [.width, .height]
+            container.addSubview(hosting)
+            window.contentView = container
+            videoLayer.frame = container.bounds
+        } else {
+            window.contentView = hosting
+        }
         self.window = window
         return window
     }

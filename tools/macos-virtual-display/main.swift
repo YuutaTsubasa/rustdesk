@@ -2,7 +2,7 @@
 // RustDesk session fills the client screen without letterboxing.
 //
 //   virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror]
-//                   [--follow-rustdesk] [--pin <bundle id>]
+//                   [--follow-rustdesk] [--pin <bundle id>] [--dashboard]
 //
 // The display exists while this process runs; Ctrl+C removes it. With --main
 // it becomes the main display for this login session only (the arrangement
@@ -16,6 +16,10 @@
 // --pin keeps that app's windows filling the physical display and moves every
 // other window from the physical display onto the virtual one. It needs the
 // Accessibility permission for this binary.
+//
+// --dashboard shows a full-screen status panel (Dashboard.swift) on the
+// physical display while the virtual display exists, and moves other windows
+// off it like --pin does.
 import AppKit
 import ApplicationServices
 import CoreGraphics
@@ -23,13 +27,14 @@ import CoreGraphics
 setvbuf(stdout, nil, _IOLBF, 0)
 let args = CommandLine.arguments
 guard args.count >= 3, let pw = UInt(args[1]), let ph = UInt(args[2]), pw % 2 == 0, ph % 2 == 0 else {
-    FileHandle.standardError.write("usage: virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror] [--follow-rustdesk] [--pin <bundle id>] (even numbers)\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror] [--follow-rustdesk] [--pin <bundle id>] [--dashboard] (even numbers)\n".data(using: .utf8)!)
     exit(64)
 }
 let makeMain = args.contains("--main")
 let mirror = args.contains("--mirror")
 let followRustDesk = args.contains("--follow-rustdesk")
 let pinBundleID = args.firstIndex(of: "--pin").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+let showDashboard = args.contains("--dashboard")
 let graceSeconds = Double(ProcessInfo.processInfo.environment["GRACE_SECONDS"] ?? "") ?? 20
 
 func log(_ message: String) {
@@ -147,13 +152,17 @@ func setWindowFrame(_ window: AXUIElement, origin: CGPoint, size: CGSize?) {
     }
 }
 
-func arrangeWindows(virtualID: CGDirectDisplayID, pin: String) {
-    guard let physical = onlineDisplays().first(where: { $0 != virtualID && CGDisplayMirrorsDisplay($0) == kCGNullDirectDisplay }) else { return }
+func physicalDisplay(besides virtualID: CGDirectDisplayID) -> CGDirectDisplayID? {
+    onlineDisplays().first { $0 != virtualID && CGDisplayMirrorsDisplay($0) == kCGNullDirectDisplay }
+}
+
+func arrangeWindows(virtualID: CGDirectDisplayID, pin: String?) {
+    guard let physical = physicalDisplay(besides: virtualID) else { return }
     let physicalBounds = CGDisplayBounds(physical)
     let virtualBounds = CGDisplayBounds(virtualID)
     let menuBar: CGFloat = 25
 
-    if !NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == pin }),
+    if let pin, !NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == pin }),
        let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: pin) {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = false
@@ -186,11 +195,14 @@ func arrangeWindows(virtualID: CGDirectDisplayID, pin: String) {
 
 var display: CGVirtualDisplay?
 var idleSince: Date?
+let dashboard = showDashboard ? Dashboard() : nil
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
 
-if let pin = pinBundleID {
+if pinBundleID != nil || showDashboard {
     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
     if !AXIsProcessTrustedWithOptions(options) {
-        log("--pin \(pin) needs Accessibility: allow this binary in System Settings > Privacy & Security > Accessibility")
+        log("--pin/--dashboard need Accessibility to move windows: allow this app in System Settings > Privacy & Security > Accessibility")
     }
 }
 
@@ -199,9 +211,11 @@ if !followRustDesk {
     if display == nil { exit(1) }
 }
 
-Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
+// 1 s so the dashboard clock ticks; reading the RustDesk log is cheap.
+Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+    let connections = openRustDeskConnections()
     if followRustDesk {
-        if openRustDeskConnections() > 0 {
+        if connections > 0 {
             idleSince = nil
             if display == nil {
                 log("RustDesk client connected")
@@ -217,11 +231,15 @@ Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
             }
         }
     }
-    if let display, let pin = pinBundleID, AXIsProcessTrusted() {
-        arrangeWindows(virtualID: display.displayID, pin: pin)
+    // Without Accessibility, windows on the physical display cannot be moved off,
+    // so the panel would hide them (System Settings included): leave it down.
+    let trusted = AXIsProcessTrusted()
+    dashboard?.update(on: trusted ? display.flatMap { physicalDisplay(besides: $0.displayID) } : nil, connections: connections)
+    if let display, pinBundleID != nil || showDashboard, trusted {
+        arrangeWindows(virtualID: display.displayID, pin: pinBundleID)
     }
 }
 
 signal(SIGINT) { _ in exit(0) }
 signal(SIGTERM) { _ in exit(0) }
-RunLoop.main.run()
+app.run()

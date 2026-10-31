@@ -4,6 +4,7 @@
 //   virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror]
 //                   [--follow-rustdesk] [--pin <bundle id>] [--dashboard]
 //                   [--wallpaper <video>] [--music <album folder>]
+//                   [--desktop-video <video>]
 //
 // The display exists while this process runs; Ctrl+C removes it. With --main
 // it becomes the main display for this login session only (the arrangement
@@ -23,6 +24,8 @@
 // off it like --pin does. A menu bar item and the panel's HIDE button (or Esc)
 // hide it or bring it back at any time, connected or not. --wallpaper loops a (muted) video behind the panel.
 // --music plays an album folder (Music.swift) while the panel is up.
+// --desktop-video loops a (muted) video as the virtual display's desktop
+// picture (DesktopVideo.swift) while it exists.
 import AppKit
 import ApplicationServices
 import CoreGraphics
@@ -30,7 +33,7 @@ import CoreGraphics
 setvbuf(stdout, nil, _IOLBF, 0)
 let args = CommandLine.arguments
 guard args.count >= 3, let pw = UInt(args[1]), let ph = UInt(args[2]), pw % 2 == 0, ph % 2 == 0 else {
-    FileHandle.standardError.write("usage: virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror] [--follow-rustdesk] [--pin <bundle id>] [--dashboard] [--wallpaper <video>] [--music <album folder>] (even numbers)\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror] [--follow-rustdesk] [--pin <bundle id>] [--dashboard] [--wallpaper <video>] [--music <album folder>] [--desktop-video <video>] (even numbers)\n".data(using: .utf8)!)
     exit(64)
 }
 let makeMain = args.contains("--main")
@@ -38,6 +41,7 @@ let mirror = args.contains("--mirror")
 let followRustDesk = args.contains("--follow-rustdesk")
 let pinBundleID = args.firstIndex(of: "--pin").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
 let showDashboard = args.contains("--dashboard")
+let desktopVideoURL = args.firstIndex(of: "--desktop-video").flatMap { $0 + 1 < args.count ? URL(fileURLWithPath: args[$0 + 1]) : nil }
 let wallpaperURL = args.firstIndex(of: "--wallpaper").flatMap { $0 + 1 < args.count ? URL(fileURLWithPath: args[$0 + 1]) : nil }
 let graceSeconds = Double(ProcessInfo.processInfo.environment["GRACE_SECONDS"] ?? "") ?? 20
 
@@ -201,6 +205,7 @@ var display: CGVirtualDisplay?
 var idleSince: Date?
 let musicURL = args.firstIndex(of: "--music").flatMap { $0 + 1 < args.count ? URL(fileURLWithPath: args[$0 + 1], isDirectory: true) : nil }
 let dashboard = showDashboard ? Dashboard(wallpaper: wallpaperURL, music: musicURL) : nil
+let desktopVideo = desktopVideoURL.map { DesktopVideo(url: $0) }
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
@@ -252,6 +257,7 @@ func tick() {
     let wanted = dashboardOverride ?? (connected && trusted)
     let target = display.map { physicalDisplay(besides: $0.displayID) } ?? CGMainDisplayID()
     dashboard?.update(on: wanted ? target : nil, connections: connections, focus: dashboardOverride == true)
+    desktopVideo?.update(on: display?.displayID)
     if let display, pinBundleID != nil || showDashboard, trusted {
         arrangeWindows(virtualID: display.displayID, pin: pinBundleID)
     }

@@ -153,6 +153,7 @@ final class DashboardModel: ObservableObject {
     @Published var backup: (when: String, failed: Int)?
     @Published var track: TrackInfo?
     var cover: NSImage?
+    var music: MusicPlayer?
 
     private var cpuSampler = CPUSampler()
     private var netSampler = NetSampler()
@@ -417,7 +418,7 @@ struct DashboardView: View {
         // character in the video stays visible.
         VStack(alignment: .leading, spacing: 0) {
             if let track = model.track {
-                NowPlayingPlate(track: track, cover: model.cover).padding(.bottom, overVideo ? 0 : 6)
+                NowPlayingPlate(track: track, cover: model.cover, music: model.music).padding(.bottom, overVideo ? 0 : 6)
             }
             if overVideo { Spacer() }
             HStack(spacing: 12) {
@@ -448,7 +449,14 @@ struct DashboardView: View {
                 Text(Self.weekdayZH.string(from: model.now)).font(.system(size: 22, weight: .heavy)).foregroundStyle(BB.ink2)
             }
             .padding(.top, -10)
-            if overVideo { Spacer().frame(height: 22) } else { Spacer() }
+            if let music = model.music {
+                if !overVideo { Spacer() }
+                SpectrumView(spectrum: music.spectrum).frame(height: 64).padding(.vertical, 10)
+            } else if overVideo {
+                Spacer().frame(height: 22)
+            } else {
+                Spacer()
+            }
             HStack(spacing: 4) {
                 ForEach(0..<24, id: \.self) { hour in
                     let current = Calendar.current.component(.hour, from: model.now)
@@ -566,6 +574,7 @@ final class Dashboard {
         self.wallpaper = wallpaper
         self.music = music.flatMap { MusicPlayer(folder: $0) }
         model.cover = self.music?.cover
+        model.music = self.music
     }
 
     /// Shows the panel full screen on `displayID`, or hides it when nil.
@@ -576,7 +585,7 @@ final class Dashboard {
             if window?.isVisible == true {
                 window?.orderOut(nil)
                 player?.pause()
-                music?.pause()
+                music?.pauseForDashboard()
             }
             return
         }
@@ -587,7 +596,7 @@ final class Dashboard {
         if !window.isVisible {
             window.orderFrontRegardless()
             player?.play()
-            music?.play()
+            music?.resumeForDashboard()
         }
     }
 

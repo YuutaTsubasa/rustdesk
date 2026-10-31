@@ -154,6 +154,7 @@ final class DashboardModel: ObservableObject {
     @Published var track: TrackInfo?
     var cover: NSImage?
     var music: MusicPlayer?
+    let spectrumFrames = SpectrumFrames()
     var onHide: (() -> Void)?
 
     private var cpuSampler = CPUSampler()
@@ -463,7 +464,7 @@ struct DashboardView: View {
             .padding(.top, -10)
             if let music = model.music {
                 if !overVideo { Spacer() }
-                SpectrumView(spectrum: music.spectrum).frame(height: 64).padding(.vertical, 10)
+                SpectrumView(frames: model.spectrumFrames).frame(height: 64).padding(.vertical, 10)
             } else if overVideo {
                 Spacer().frame(height: 22)
             } else {
@@ -590,6 +591,7 @@ final class Dashboard {
     private var window: NSWindow?
     private let wallpaper: URL?
     private var player: AVQueuePlayer?
+    private var spectrumTimer: Timer?
     private var looper: AVPlayerLooper?
     let music: MusicPlayer?
     var onHide: (() -> Void)? {
@@ -615,6 +617,8 @@ final class Dashboard {
                 window?.orderOut(nil)
                 player?.pause()
                 music?.pauseForDashboard()
+                spectrumTimer?.invalidate()
+                spectrumTimer = nil
             }
             return
         }
@@ -630,6 +634,12 @@ final class Dashboard {
             window.orderFrontRegardless()
             player?.play()
             music?.resumeForDashboard()
+            if let music, spectrumTimer == nil {
+                let frames = model.spectrumFrames
+                let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { _ in frames.levels = music.spectrum.frame() }
+                RunLoop.main.add(timer, forMode: .common)
+                spectrumTimer = timer
+            }
         }
     }
 

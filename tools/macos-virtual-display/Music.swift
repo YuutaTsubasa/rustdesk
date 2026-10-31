@@ -292,39 +292,44 @@ final class MusicPlayer {
 
 // MARK: - views
 
+/// Levels for the view, pushed at 30 fps by Dashboard while the panel is up.
+/// (A TimelineView(.animation) never ticked in this borderless window, which
+/// left the spectrum flat.)
+final class SpectrumFrames: ObservableObject {
+    @Published var levels = [Float](repeating: 0, count: Spectrum.bands)
+}
+
 struct SpectrumView: View {
-    let spectrum: Spectrum
+    @ObservedObject var frames: SpectrumFrames
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30)) { _ in
-            Canvas { context, size in
-                let levels = spectrum.frame()
-                let step = size.width / CGFloat(levels.count)
-                let barWidth = max(step * 0.45, 2)
-                var points: [CGPoint] = []
-                for (i, level) in levels.enumerated() {
-                    let height = max(CGFloat(level) * size.height, 2)
-                    let x = CGFloat(i) * step + step / 2
-                    points.append(CGPoint(x: x, y: size.height - height))
-                    let bar = CGRect(x: x - barWidth / 2, y: size.height - height, width: barWidth, height: height)
-                    context.fill(Path(bar), with: .linearGradient(Gradient(colors: [BB.sky.opacity(0.9), BB.blue.opacity(0.25)]),
-                                                                  startPoint: CGPoint(x: 0, y: bar.minY), endPoint: CGPoint(x: 0, y: size.height)))
-                }
-                // A smooth line over the bar tops, with a glow.
-                var line = Path()
-                if let first = points.first {
-                    line.move(to: first)
-                    for i in 1..<points.count {
-                        let mid = CGPoint(x: (points[i - 1].x + points[i].x) / 2, y: (points[i - 1].y + points[i].y) / 2)
-                        line.addQuadCurve(to: mid, control: points[i - 1])
-                    }
-                    if let last = points.last { line.addLine(to: last) }
-                }
-                var glow = context
-                glow.addFilter(.blur(radius: 6))
-                glow.stroke(line, with: .color(BB.sky), lineWidth: 4)
-                context.stroke(line, with: .color(BB.yellow), lineWidth: 1.5)
+        Canvas { context, size in
+            let levels = frames.levels
+            let step = size.width / CGFloat(levels.count)
+            let barWidth = max(step * 0.45, 2)
+            var points: [CGPoint] = []
+            for (i, level) in levels.enumerated() {
+                let height = max(CGFloat(level) * size.height, 2)
+                let x = CGFloat(i) * step + step / 2
+                points.append(CGPoint(x: x, y: size.height - height))
+                let bar = CGRect(x: x - barWidth / 2, y: size.height - height, width: barWidth, height: height)
+                context.fill(Path(bar), with: .linearGradient(Gradient(colors: [BB.sky.opacity(0.9), BB.blue.opacity(0.25)]),
+                                                              startPoint: CGPoint(x: 0, y: bar.minY), endPoint: CGPoint(x: 0, y: size.height)))
             }
+            // A smooth line over the bar tops, with a glow.
+            var line = Path()
+            if let first = points.first {
+                line.move(to: first)
+                for i in 1..<points.count {
+                    let mid = CGPoint(x: (points[i - 1].x + points[i].x) / 2, y: (points[i - 1].y + points[i].y) / 2)
+                    line.addQuadCurve(to: mid, control: points[i - 1])
+                }
+                if let last = points.last { line.addLine(to: last) }
+            }
+            var glow = context
+            glow.addFilter(.blur(radius: 6))
+            glow.stroke(line, with: .color(BB.sky), lineWidth: 4)
+            context.stroke(line, with: .color(BB.yellow), lineWidth: 1.5)
         }
     }
 }

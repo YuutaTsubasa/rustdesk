@@ -597,6 +597,10 @@ final class Dashboard {
     /// Keeps the display awake while the panel is shown, so it works as a clock.
     private var noDisplaySleep: IOPMAssertionID?
     private var looper: AVPlayerLooper?
+    /// Someone is using the panel: an iPad is connected or it was opened by hand.
+    /// Only then does the music play and the display stay awake; otherwise the
+    /// panel just sits there as a clock and the display sleeps as usual.
+    private var active = false
     let music: MusicPlayer?
     var onHide: (() -> Void)? {
         get { model.onHide }
@@ -620,14 +624,10 @@ final class Dashboard {
             if window?.isVisible == true {
                 window?.orderOut(nil)
                 player?.pause()
-                music?.pauseForDashboard()
                 spectrumTimer?.invalidate()
                 spectrumTimer = nil
-                if let assertion = noDisplaySleep {
-                    IOPMAssertionRelease(assertion)
-                    noDisplaySleep = nil
-                }
             }
+            setActive(false)
             return
         }
         model.refresh(connections: connections)
@@ -641,19 +641,31 @@ final class Dashboard {
             }
             window.orderFrontRegardless()
             player?.play()
-            music?.resumeForDashboard()
             if let music, spectrumTimer == nil {
                 let frames = model.spectrumFrames
                 let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { _ in frames.levels = music.spectrum.frame() }
                 RunLoop.main.add(timer, forMode: .common)
                 spectrumTimer = timer
             }
-            if noDisplaySleep == nil {
-                var assertion = IOPMAssertionID(0)
-                if IOPMAssertionCreateWithName(kIOPMAssertionTypeNoDisplaySleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                                               "Dashboard panel is shown" as CFString, &assertion) == kIOReturnSuccess {
-                    noDisplaySleep = assertion
-                }
+        }
+        setActive(connections > 0 || focus)
+    }
+
+    private func setActive(_ value: Bool) {
+        guard value != active else { return }
+        active = value
+        if value {
+            music?.resumeForDashboard()
+            var assertion = IOPMAssertionID(0)
+            if IOPMAssertionCreateWithName(kIOPMAssertionTypeNoDisplaySleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                                           "Dashboard panel is shown" as CFString, &assertion) == kIOReturnSuccess {
+                noDisplaySleep = assertion
+            }
+        } else {
+            music?.pauseForDashboard()
+            if let assertion = noDisplaySleep {
+                IOPMAssertionRelease(assertion)
+                noDisplaySleep = nil
             }
         }
     }

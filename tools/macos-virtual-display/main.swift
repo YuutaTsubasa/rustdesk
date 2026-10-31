@@ -20,10 +20,12 @@
 // Accessibility permission for this binary.
 //
 // --dashboard shows a full-screen status panel (Dashboard.swift) on the
-// physical display while the virtual display exists, and moves other windows
-// off it like --pin does. A menu bar item and the panel's HIDE button (or Esc)
-// hide it or bring it back at any time, connected or not. --wallpaper loops a (muted) video behind the panel.
-// --music plays an album folder (Music.swift) while the panel is up.
+// physical display, connected or not, and while the virtual display exists
+// moves other windows off it like --pin does. A menu bar item and the panel's
+// HIDE button (or Esc) hide it or bring it back. --wallpaper loops a (muted)
+// video behind the panel.
+// --music plays an album folder (Music.swift) while the panel is up and an
+// iPad is connected (or the panel was opened by hand).
 // --desktop-video loops a (muted) video as the desktop picture of every
 // display the panel is not covering (DesktopVideo.swift).
 import AppKit
@@ -259,7 +261,7 @@ func tick() {
     // so the panel would hide them (System Settings included): only show it then
     // when asked to.
     let trusted = AXIsProcessTrusted()
-    let wanted = dashboardOverride ?? (connected && trusted)
+    let wanted = dashboardOverride ?? trusted
     let target = display.map { physicalDisplay(besides: $0.displayID) } ?? CGMainDisplayID()
     dashboard?.update(on: wanted ? target : nil, connections: connections, focus: dashboardOverride == true)
     if let desktopVideo {

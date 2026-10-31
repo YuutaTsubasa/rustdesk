@@ -546,7 +546,8 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 12) {
                 StatusRow(on: model.connections > 0, label: "iPad",
                           value: model.connectedSince.map { "連線中 · " + duration(model.now.timeIntervalSince($0)) } ?? "未連線")
-                StatusRow(on: model.tailscale != nil, label: "Tailscale", value: model.tailscale ?? "離線")
+                // State only: the panel ends up in screen recordings, so keep the address off it.
+                StatusRow(on: model.tailscale != nil, label: "Tailscale", value: model.tailscale != nil ? "已連線" : "離線")
                 StatusRow(on: model.backup != nil, label: "Backup",
                           value: model.backup.map { $0.failed == 0 ? "\($0.when) 完成" : "\($0.when) 失敗 \($0.failed) 項" } ?? "沒有紀錄",
                           warn: (model.backup?.failed ?? 0) > 0)

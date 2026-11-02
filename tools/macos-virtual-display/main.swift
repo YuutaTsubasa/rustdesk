@@ -4,7 +4,7 @@
 //   virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror]
 //                   [--follow-rustdesk] [--pin <bundle id>] [--dashboard]
 //                   [--wallpaper <video>] [--music <album folder>]
-//                   [--desktop-video <video>]
+//                   [--desktop-video <video>] [--remote <port>]
 //
 // The display exists while this process runs; Ctrl+C removes it. With --main
 // it becomes the main display for this login session only (the arrangement
@@ -28,6 +28,8 @@
 // iPad is connected (or the panel was opened by hand).
 // --desktop-video loops a (muted) video as the desktop picture of every
 // display the panel is not covering (DesktopVideo.swift).
+// --remote serves a page on that port for the music and the panel, to this
+// Mac and Tailscale peers only (RemoteControl.swift).
 import AppKit
 import ApplicationServices
 import CoreGraphics
@@ -35,7 +37,7 @@ import CoreGraphics
 setvbuf(stdout, nil, _IOLBF, 0)
 let args = CommandLine.arguments
 guard args.count >= 3, let pw = UInt(args[1]), let ph = UInt(args[2]), pw % 2 == 0, ph % 2 == 0 else {
-    FileHandle.standardError.write("usage: virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror] [--follow-rustdesk] [--pin <bundle id>] [--dashboard] [--wallpaper <video>] [--music <album folder>] [--desktop-video <video>] (even numbers)\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: virtual-display <pixelWidth> <pixelHeight> [--main] [--mirror] [--follow-rustdesk] [--pin <bundle id>] [--dashboard] [--wallpaper <video>] [--music <album folder>] [--desktop-video <video>] [--remote <port>] (even numbers)\n".data(using: .utf8)!)
     exit(64)
 }
 let makeMain = args.contains("--main")
@@ -324,6 +326,10 @@ func setDashboardShown(_ shown: Bool) {
     tick()
 }
 let statusMenu = dashboard.map { StatusMenu(dashboard: $0, setShown: setDashboardShown) }
+let remotePort = args.firstIndex(of: "--remote").flatMap { $0 + 1 < args.count ? UInt16(args[$0 + 1]) : nil }
+let remoteControl = dashboard.flatMap { dashboard in
+    remotePort.flatMap { RemoteControl(port: $0, music: dashboard.music, isPanelShown: { dashboard.isShown }, setPanelShown: setDashboardShown) }
+}
 dashboard?.onHide = { setDashboardShown(false) }
 
 // 1 s so the dashboard clock ticks; reading the RustDesk log is cheap.

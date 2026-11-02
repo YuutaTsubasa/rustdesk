@@ -221,6 +221,22 @@ final class MusicPlayer {
         publishNowPlaying()
     }
 
+    /// Titles in play order, parsed like `info.title`.
+    var titles: [String] {
+        tracks.map { url in
+            let name = url.deletingPathExtension().lastPathComponent.components(separatedBy: " - ").last ?? ""
+            guard let space = name.firstIndex(of: " "), name[..<space].allSatisfy(\.isNumber) else { return name }
+            return String(name[name.index(after: space)...])
+        }
+    }
+
+    func select(_ track: Int) {
+        guard tracks.indices.contains(track) else { return }
+        load(track, from: 0)
+        if playing { startNode() } else { play() }
+        publishNowPlaying()
+    }
+
     func seek(to seconds: Double) {
         load(index, from: max(seconds, 0))
         if playing { startNode() }
